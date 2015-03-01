@@ -1,1 +1,1 @@
-# Kursach
+# Project description
