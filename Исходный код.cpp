@@ -6,7 +6,9 @@
 
 using namespace std;
 
-void DeletPartition(HANDLE, byte);
+void GetDiskGeometry(HANDLE);
+void GrowPartition(HANDLE, int);
+
 
 /* структура элемента раздела */
 struct Part {
@@ -91,24 +93,26 @@ int main()
 
 	while (1)
 	{
-		puts("1 - Вывод информации о разделах");
-		puts("2 - Создать раздел");
-		puts("3 - Удалить раздел");
-		puts("4 - Увеличить раздел");
-		puts("5 - Уменьшить раздел");
-		puts("0 - Выход");
+		cout << "1 - Вывод информации о разделах" << endl;
+		cout << "2 - Создать раздел" << endl;
+		cout << "3 - Удалить раздел" << endl;
+		cout << "4 - Увеличить раздел" << endl;
+		cout << "5 - Уменьшить раздел" << endl;
+		cout << "0 - Выход" << endl;
 		switch (getch())
 		{
 		case '1':
-			printf("\nРаздел 1:\nCвободно %d", lpdlDriveLayoutInfo->PartitionEntry[0].PartitionLength);
-			printf("\nРаздел 2:\nCвободно %d", lpdlDriveLayoutInfo->PartitionEntry[1].PartitionLength);
-			printf("\nРаздел 3:\nCвободно %d", lpdlDriveLayoutInfo->PartitionEntry[2].PartitionLength);
-			printf("\nРаздел 4:\nCвободно %d", lpdlDriveLayoutInfo->PartitionEntry[3].PartitionLength);
+			cout << "Раздел 1:\nCвободно %d" << lpdlDriveLayoutInfo->PartitionEntry[0].PartitionLength.QuadPart << endl;
+			cout << "Раздел 2:\nCвободно %d" << lpdlDriveLayoutInfo->PartitionEntry[1].PartitionLength.QuadPart << endl;
+			cout << "Раздел 3:\nCвободно %d" << lpdlDriveLayoutInfo->PartitionEntry[2].PartitionLength.QuadPart << endl;
+			cout << "Раздел 4:\nCвободно %d" << lpdlDriveLayoutInfo->PartitionEntry[3].PartitionLength.QuadPart << endl;
+			GetDiskGeometry(hFile);
 			break;
 		case '2':
+			
 			break;
 		case '3':
-			puts("Введите номер раздела: ");
+			cout << "Введите номер раздела: " << endl;
 			while (flEnd)
 			{
 				switch (getch())
@@ -120,9 +124,9 @@ int main()
 					if (!WriteFile(hFile, &buf, 512, &numberOfBytesRead, NULL))
 					{
 						int error = GetLastError();
-						printf("\nError %d", error);
+						cout << "\nError" << error << endl;
 					}
-					puts("Раздел успешно удален");
+					cout << "Раздел успешно удален" << endl;
 					flEnd = 0;
 					break;
 				case '2':
@@ -132,9 +136,9 @@ int main()
 					if (!WriteFile(hFile, &buf, 512, &numberOfBytesRead, NULL))
 					{
 						int error = GetLastError();
-						printf("\nError %d", error);
+						cout << "\nError" << error << endl;
 					}
-					puts("Раздел успешно удален");
+					cout << "Раздел успешно удален" << endl;
 					flEnd = 0;
 					break;
 				case '3':
@@ -146,7 +150,7 @@ int main()
 						int error = GetLastError();
 						printf("\nError %d", error);
 					}
-					puts("Раздел успешно удален");
+					cout << "Раздел успешно удален" << endl;
 					flEnd = 0;
 					break;
 				case '4':
@@ -158,62 +162,20 @@ int main()
 						int error = GetLastError();
 						printf("\nError %d", error);
 					}
-					puts("Раздел успешно удален");
+					cout << "Раздел успешно удален" << endl;
 					flEnd = 0;
 					break;
 				default:
-					puts("Неправильно!!!Попробуй еще раз");
+					cout << "Неправильно!!!Попробуй еще раз" << endl;
 					break;
 				}
 			}
 			break;
 		case '4':
-			int sizeHigh;
-			puts("Введите номер раздела: ");
-			scanf("%d", &sizeHigh);
-			dgp.PartitionNumber = sizeHigh;
-			puts("Увеличить раздел на (Мегабайт): ");
-			scanf("%d", &sizeHigh );
-			dgp.BytesToGrow.QuadPart = sizeHigh  * 1024 * 1024;
-
-			result = DeviceIoControl(
-				hFile,
-				IOCTL_DISK_GROW_PARTITION,
-				&dgp,
-				sizeof dgp,
-				NULL,
-				0,
-				&dwBytesReturned,
-				NULL);
-			if (!result)
-			{
-				int error = GetLastError();
-				printf("\nError %d", error);
-			}
+			GrowPartition(hFile, 1);
 			break;
 		case '5':
-			int sizeLow;
-			puts("Введите номер раздела: ");
-			scanf("%d", &sizeLow);
-			dgp.PartitionNumber = sizeLow;
-			puts("Уменьшить раздел на (Мегабайт): ");
-			scanf("%d", &sizeLow);
-			dgp.BytesToGrow.QuadPart = -sizeLow * 1024 * 1024;
-
-			result = DeviceIoControl(
-				hFile,
-				IOCTL_DISK_GROW_PARTITION,
-				&dgp,
-				sizeof dgp,
-				NULL,
-				0,
-				&dwBytesReturned,
-				NULL);
-			if (!result)
-			{
-				int error = GetLastError();
-				printf("\nError %d", error);
-			}
+			GrowPartition(hFile, -1);
 			break;
 		case '0': 
 			return 0;
@@ -225,13 +187,76 @@ int main()
 	return 0;
 }
 
-void DeletPartition(HANDLE hFile, byte buf)
+void GetDiskGeometry(HANDLE hDevice)
 {
-	DWORD numberOfBytesRead;
+	int result = 0;
 
-	if (!WriteFile(hFile, &buf, 512, &numberOfBytesRead, NULL))
+	DISK_GEOMETRY_EX diskGeometry;
+	DWORD BytesReturned = 0;
+
+	result = DeviceIoControl(
+		hDevice,					
+		IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,	 
+		NULL,								 
+		0,									 
+		&diskGeometry,				
+		sizeof(diskGeometry),				
+		&BytesReturned,			  
+		NULL								  
+		);
+
+	if (!result)
 	{
 		int error = GetLastError();
-		printf("\nError %d", error);
+		cout << "\nError " << error;
+		return;
 	}
+
+	cout << "Количество цилиндров:  " << diskGeometry.Geometry.Cylinders.QuadPart << endl;
+	cout << "Дорожек в цилинде:     " << diskGeometry.Geometry.TracksPerCylinder << endl;
+	cout << "Секторов на дорожке:   " << diskGeometry.Geometry.SectorsPerTrack << endl;
+	cout << "Байт в секторе:        " << diskGeometry.Geometry.BytesPerSector << endl;
+	int col = diskGeometry.Geometry.Cylinders.QuadPart*diskGeometry.Geometry.TracksPerCylinder*diskGeometry.Geometry.SectorsPerTrack;
+	cout << "Количество сектров:    " << col << endl;
+	cout << "Size in byte           " << col*diskGeometry.Geometry.BytesPerSector << endl;
+	cout << "Размер диска в байтах: " << diskGeometry.DiskSize.QuadPart << endl;
 }
+
+void GrowPartition(HANDLE hDevice, int operation)
+{
+	DISK_GROW_PARTITION growPartition;
+	DWORD BytesReturned = 0;
+
+	int size;
+	int numPart;
+	int result = 0;
+
+	cout << "Введите номер раздела: ";
+	scanf("%d", &numPart);
+	cout << endl;
+	growPartition.PartitionNumber = numPart;
+
+	cout << "Уменьшить раздел на (Мегабайт): ";
+	cin >> size;
+	growPartition.BytesToGrow.QuadPart = operation * size * 1024 * 1024;
+
+	result = DeviceIoControl(
+		hDevice,
+		IOCTL_DISK_GROW_PARTITION,
+		&growPartition,
+		sizeof(growPartition),
+		NULL,
+		0,
+		&BytesReturned,
+		NULL);
+
+	if (!result)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return;
+	}
+
+	cout << "Раздел изменен" << endl;
+}
+
