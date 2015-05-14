@@ -8,7 +8,8 @@ using namespace std;
 
 void GetDiskGeometry(HANDLE);
 void GrowPartition(HANDLE, int);
-
+void AddPartition(HANDLE);
+DRIVE_LAYOUT_INFORMATION* GetDriveLayoutInformation(HANDLE);
 
 /* структура элемента раздела */
 struct Part {
@@ -60,33 +61,6 @@ int main()
 	partOne.RelSec = *(buf + 453);
 	partOne.Size = *(buf + 458);
 
-	
-	DRIVE_LAYOUT_INFORMATION *lpdlDriveLayoutInfo = (DRIVE_LAYOUT_INFORMATION *)malloc(1024 * 1024);
-	if (!lpdlDriveLayoutInfo)
-	{
-		int error = GetLastError();
-		printf("\nError %d", error);
-	} 
-	DWORD dwRead;
-
-	int result;
-	result = DeviceIoControl(hFile,
-		IOCTL_DISK_GET_DRIVE_LAYOUT,
-		NULL,
-		0,
-		lpdlDriveLayoutInfo,
-		1024 * 1024,
-		&dwRead,
-		NULL);
-	if (!result)
-	{
-		int error = GetLastError();
-		printf("\nError %d", error);
-	}
-
-	DISK_GROW_PARTITION dgp;
-	DWORD dwBytesReturned = 0;
-	
 	setlocale(LC_ALL, "Russian");
 
 	int flEnd = 1;
@@ -102,19 +76,31 @@ int main()
 		switch (getch())
 		{
 		case '1':
-			cout << "Раздел 1:\nCвободно %d" << lpdlDriveLayoutInfo->PartitionEntry[0].PartitionLength.QuadPart << endl;
-			cout << "Раздел 2:\nCвободно %d" << lpdlDriveLayoutInfo->PartitionEntry[1].PartitionLength.QuadPart << endl;
-			cout << "Раздел 3:\nCвободно %d" << lpdlDriveLayoutInfo->PartitionEntry[2].PartitionLength.QuadPart << endl;
-			cout << "Раздел 4:\nCвободно %d" << lpdlDriveLayoutInfo->PartitionEntry[3].PartitionLength.QuadPart << endl;
+			DRIVE_LAYOUT_INFORMATION * lpdlDriveLayoutInfo;
+			int size;
+			size = sizeof(DRIVE_LAYOUT_INFORMATION)+4 * sizeof(PARTITION_INFORMATION);
+			lpdlDriveLayoutInfo = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
+			lpdlDriveLayoutInfo = GetDriveLayoutInformation(hFile);
+
+			for (int i = 0; i < 4; i++)
+			{
+				cout << "Индакатор загрузки: " << lpdlDriveLayoutInfo->PartitionEntry[i].BootIndicator << endl;
+				cout << "Номер раздела: " << lpdlDriveLayoutInfo->PartitionEntry[i].PartitionNumber<< endl;
+				cout << "Тип раздела: " << lpdlDriveLayoutInfo->PartitionEntry[i].PartitionType << endl;
+				cout << "Стартовое смещение: " << lpdlDriveLayoutInfo->PartitionEntry[i].StartingOffset.QuadPart << endl;
+				cout << "Раздел " << i << ":\nCвободно " << lpdlDriveLayoutInfo->PartitionEntry[i].PartitionLength.QuadPart / 1024 / 1024 << " Mb" << endl;
+			}
+			
 			GetDiskGeometry(hFile);
 			break;
 		case '2':
-			
+			AddPartition(hFile);
 			break;
 		case '3':
 			cout << "Введите номер раздела: " << endl;
 			while (flEnd)
 			{
+				fflush(stdin);
 				switch (getch())
 				{
 				case '1':
@@ -260,3 +246,137 @@ void GrowPartition(HANDLE hDevice, int operation)
 	cout << "Раздел изменен" << endl;
 }
 
+void AddPartition(HANDLE hDevice)
+{
+	DRIVE_LAYOUT_INFORMATION *setDriveLayoutInformation;
+	DRIVE_LAYOUT_INFORMATION *getDriveLayoutInformation;
+
+	DWORD dwBytesReturned = 0;
+	DWORD size = 0;
+
+	int result = 0;
+	int lengthPartition = 0;
+	int newOffset = 0;
+	int partitionType = 0;
+
+	cout << "Вас приветствует мастер создания разделов" << endl;
+	cout << "Введите размер раздела в мегабайтах: ";
+	cin >> lengthPartition;
+	cout << endl;
+
+	cout << "Выберите тип раздела:" << endl;
+	cout << "1. NTFS" << endl;
+	cout << "2. FAT" << endl;
+	cout << "3. EXTENDED" << endl;
+	cin >> partitionType;
+		switch (partitionType)
+	{
+		case '1':
+			fflush(stdin);
+			partitionType = 0x07;
+			break;
+		case '2':
+			fflush(stdin);
+			partitionType = 0x06;
+			break;
+		case '3':
+			fflush(stdin);
+			partitionType = 0x05;
+			break;
+	}
+
+	size = sizeof(DRIVE_LAYOUT_INFORMATION)+4 * sizeof(PARTITION_INFORMATION);
+	setDriveLayoutInformation = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
+	if (!setDriveLayoutInformation)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return;
+	}
+
+	getDriveLayoutInformation = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
+	if (!getDriveLayoutInformation)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return;
+	}
+
+	getDriveLayoutInformation = GetDriveLayoutInformation(hDevice);
+
+	setDriveLayoutInformation->PartitionCount = 4;
+	setDriveLayoutInformation->Signature = 0xA4B57300;
+
+	for (int i = 0; i < 4; i++)
+	{
+		newOffset += getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart;
+		if (getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart == 0)
+		{	
+			getDriveLayoutInformation->PartitionEntry[i].StartingOffset.QuadPart = 512 + newOffset;
+			getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart = lengthPartition * 1024 * 1024;
+			getDriveLayoutInformation->PartitionEntry[i].HiddenSectors = 0;
+			getDriveLayoutInformation->PartitionEntry[i].PartitionNumber = i;
+			getDriveLayoutInformation->PartitionEntry[i].PartitionType = 0x05;
+			getDriveLayoutInformation->PartitionEntry[i].BootIndicator = 0;
+			getDriveLayoutInformation->PartitionEntry[i].RecognizedPartition = 1;
+			getDriveLayoutInformation->PartitionEntry[i].RewritePartition = 1;
+			break;
+		}
+	}
+
+	result = DeviceIoControl(
+		hDevice,         
+		IOCTL_DISK_SET_DRIVE_LAYOUT,
+		getDriveLayoutInformation,         
+		size,      
+		NULL,                       
+		0,                           
+		&dwBytesReturned,  
+		NULL  
+		);
+
+	if (!result)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return;
+	}
+
+	cout << "Раздел успешно создан" << endl;
+}
+
+DRIVE_LAYOUT_INFORMATION* GetDriveLayoutInformation(HANDLE hDevice)
+{
+	DRIVE_LAYOUT_INFORMATION *driveLayoutInformation;
+	DWORD dwBytesReturned = 0;
+
+	int result;
+	int size;
+
+	size = sizeof(DRIVE_LAYOUT_INFORMATION) + 4 * sizeof(PARTITION_INFORMATION);
+	driveLayoutInformation = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
+	if (!driveLayoutInformation)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return 0;
+	}
+
+	result = DeviceIoControl(hDevice,
+		IOCTL_DISK_GET_DRIVE_LAYOUT,
+		NULL,
+		0,
+		driveLayoutInformation,
+		size,
+		&dwBytesReturned,
+		NULL);
+
+	if (!result)
+	{
+		int error = GetLastError();
+		cout << "\Error " << error << endl;
+		return 0;
+	}
+
+	return driveLayoutInformation;
+}
