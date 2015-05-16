@@ -8,7 +8,9 @@ using namespace std;
 
 void GetDiskGeometry(HANDLE);
 void GrowPartition(HANDLE, int);
-void AddPartition(HANDLE);
+void PartitionManager(HANDLE);
+void AddPartition(HANDLE, DWORD, BYTE, BYTE, BOOLEAN);
+void DeletePartition(HANDLE);
 DRIVE_LAYOUT_INFORMATION* GetDriveLayoutInformation(HANDLE);
 
 /* структура элемента раздела */
@@ -73,35 +75,39 @@ int main()
 		cout << "4 - Увеличить раздел" << endl;
 		cout << "5 - Уменьшить раздел" << endl;
 		cout << "0 - Выход" << endl;
-		switch (getch())
+		switch (_getch())
 		{
 		case '1':
-			DRIVE_LAYOUT_INFORMATION * lpdlDriveLayoutInfo;
+			DRIVE_LAYOUT_INFORMATION *getDriveLayoutInformation;
 			int size;
-			size = sizeof(DRIVE_LAYOUT_INFORMATION)+4 * sizeof(PARTITION_INFORMATION);
-			lpdlDriveLayoutInfo = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
-			lpdlDriveLayoutInfo = GetDriveLayoutInformation(hFile);
-
-			for (int i = 0; i < 4; i++)
+			size = sizeof(DRIVE_LAYOUT_INFORMATION)+16 * sizeof(PARTITION_INFORMATION);
+			getDriveLayoutInformation = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
+			getDriveLayoutInformation = GetDriveLayoutInformation(hFile);
+			
+			for (int i = 0; i < 16; i++)
 			{
-				cout << "Индакатор загрузки: " << lpdlDriveLayoutInfo->PartitionEntry[i].BootIndicator << endl;
-				cout << "Номер раздела: " << lpdlDriveLayoutInfo->PartitionEntry[i].PartitionNumber<< endl;
-				cout << "Тип раздела: " << lpdlDriveLayoutInfo->PartitionEntry[i].PartitionType << endl;
-				cout << "Стартовое смещение: " << lpdlDriveLayoutInfo->PartitionEntry[i].StartingOffset.QuadPart << endl;
-				cout << "Раздел " << i << ":\nCвободно " << lpdlDriveLayoutInfo->PartitionEntry[i].PartitionLength.QuadPart / 1024 / 1024 << " Mb" << endl;
+				cout << "Раздел: " << i << endl << endl;
+				cout << "StartingOffset          " << getDriveLayoutInformation->PartitionEntry[i].StartingOffset.QuadPart << endl;
+				cout << "PartitionLength         " << getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart << endl;
+				cout << "HiddenSectors           " << getDriveLayoutInformation->PartitionEntry[i].HiddenSectors << endl;
+				cout << "PartitionNumber         " << getDriveLayoutInformation->PartitionEntry[i].PartitionNumber << endl;
+				cout << "PartitionType           " << getDriveLayoutInformation->PartitionEntry[i].PartitionType << endl;
+				cout << "BootIndicator           " << (short)getDriveLayoutInformation->PartitionEntry[i].BootIndicator << endl;
+				cout << "RecognizedPartition     " << (short)getDriveLayoutInformation->PartitionEntry[i].RecognizedPartition << endl;
+				cout << "RewritePartition        " << (int)getDriveLayoutInformation->PartitionEntry[i].RewritePartition << endl;
 			}
 			
-			GetDiskGeometry(hFile);
+			//GetDiskGeometry(hFile);
 			break;
 		case '2':
-			AddPartition(hFile);
+			PartitionManager(hFile);
 			break;
 		case '3':
-			cout << "Введите номер раздела: " << endl;
+			/*cout << "Введите номер раздела: " << endl;
 			while (flEnd)
 			{
 				fflush(stdin);
-				switch (getch())
+				switch (_getch())
 				{
 				case '1':
 					for (int i = 446; i < 462; i++)
@@ -156,6 +162,8 @@ int main()
 					break;
 				}
 			}
+			break;*/
+			DeletePartition(hFile);
 			break;
 		case '4':
 			GrowPartition(hFile, 1);
@@ -175,8 +183,8 @@ int main()
 
 void GetDiskGeometry(HANDLE hDevice)
 {
-	int result = 0;
-
+	WORD result = 0;
+	LONGLONG col = 0;
 	DISK_GEOMETRY_EX diskGeometry;
 	DWORD BytesReturned = 0;
 
@@ -202,7 +210,7 @@ void GetDiskGeometry(HANDLE hDevice)
 	cout << "Дорожек в цилинде:     " << diskGeometry.Geometry.TracksPerCylinder << endl;
 	cout << "Секторов на дорожке:   " << diskGeometry.Geometry.SectorsPerTrack << endl;
 	cout << "Байт в секторе:        " << diskGeometry.Geometry.BytesPerSector << endl;
-	int col = diskGeometry.Geometry.Cylinders.QuadPart*diskGeometry.Geometry.TracksPerCylinder*diskGeometry.Geometry.SectorsPerTrack;
+	col = diskGeometry.Geometry.Cylinders.QuadPart*diskGeometry.Geometry.TracksPerCylinder*diskGeometry.Geometry.SectorsPerTrack;
 	cout << "Количество сектров:    " << col << endl;
 	cout << "Size in byte           " << col*diskGeometry.Geometry.BytesPerSector << endl;
 	cout << "Размер диска в байтах: " << diskGeometry.DiskSize.QuadPart << endl;
@@ -218,11 +226,11 @@ void GrowPartition(HANDLE hDevice, int operation)
 	int result = 0;
 
 	cout << "Введите номер раздела: ";
-	scanf("%d", &numPart);
+	scanf_s("%d", &numPart);
 	cout << endl;
 	growPartition.PartitionNumber = numPart;
 
-	cout << "Уменьшить раздел на (Мегабайт): ";
+	cout << "Изменить раздел на (Мегабайт): ";
 	cin >> size;
 	growPartition.BytesToGrow.QuadPart = operation * size * 1024 * 1024;
 
@@ -246,53 +254,59 @@ void GrowPartition(HANDLE hDevice, int operation)
 	cout << "Раздел изменен" << endl;
 }
 
-void AddPartition(HANDLE hDevice)
+void PartitionManager(HANDLE hDevice)
 {
-	DRIVE_LAYOUT_INFORMATION *setDriveLayoutInformation;
-	DRIVE_LAYOUT_INFORMATION *getDriveLayoutInformation;
+	DWORD lengthPartition = 0;
+	BOOLEAN recognizedPartition = 0;
+	BOOLEAN logicalDisk = 0;
+	BYTE partitionType = 0;
 
-	DWORD dwBytesReturned = 0;
-	DWORD size = 0;
-
-	int result = 0;
-	int lengthPartition = 0;
-	int newOffset = 0;
-	int partitionType = 0;
+	system("CLS");
 
 	cout << "Вас приветствует мастер создания разделов" << endl;
+
 	cout << "Введите размер раздела в мегабайтах: ";
 	cin >> lengthPartition;
 	cout << endl;
 
 	cout << "Выберите тип раздела:" << endl;
-	cout << "1. NTFS" << endl;
-	cout << "2. FAT" << endl;
-	cout << "3. EXTENDED" << endl;
-	cin >> partitionType;
+	cout << "1. Основной" << endl;
+	cout << "2. Расширенный" << endl;
+	cout << "3. Логический диск" << endl;
+	cin>> partitionType;
+
 		switch (partitionType)
 	{
 		case '1':
-			fflush(stdin);
-			partitionType = 0x07;
+			partitionType = 0x06;
+			recognizedPartition = 1;
+			AddPartition(hDevice, lengthPartition, recognizedPartition, partitionType, logicalDisk);
 			break;
 		case '2':
-			fflush(stdin);
-			partitionType = 0x06;
+			partitionType = 0x05;
+			recognizedPartition = 0;
+			AddPartition(hDevice, lengthPartition, recognizedPartition, partitionType, logicalDisk);
 			break;
 		case '3':
-			fflush(stdin);
-			partitionType = 0x05;
+			partitionType = 0x06;
+			recognizedPartition = 1;
+			logicalDisk = 1;
+			AddPartition(hDevice, lengthPartition, recognizedPartition, partitionType, logicalDisk);
 			break;
 	}
+	cout << "Раздел успешно создан" << endl;
+}
 
-	size = sizeof(DRIVE_LAYOUT_INFORMATION)+4 * sizeof(PARTITION_INFORMATION);
-	setDriveLayoutInformation = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
-	if (!setDriveLayoutInformation)
-	{
-		int error = GetLastError();
-		cout << "\nError " << error << endl;
-		return;
-	}
+void AddPartition(HANDLE hDevice, DWORD lengthPartition, BYTE recognizedPartition, BYTE partitionType, BOOLEAN logicalDisk)
+{
+	DRIVE_LAYOUT_INFORMATION *getDriveLayoutInformation;
+	DWORD dwBytesReturned = 0;
+	DWORD size = 0;
+	BYTE result = 0;
+	LONGLONG newOffset = 0;
+	BYTE partitionNumber = 0;
+
+	size = sizeof(DRIVE_LAYOUT_INFORMATION)+16 * sizeof(PARTITION_INFORMATION);
 
 	getDriveLayoutInformation = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
 	if (!getDriveLayoutInformation)
@@ -304,35 +318,97 @@ void AddPartition(HANDLE hDevice)
 
 	getDriveLayoutInformation = GetDriveLayoutInformation(hDevice);
 
-	setDriveLayoutInformation->PartitionCount = 4;
-	setDriveLayoutInformation->Signature = 0xA4B57300;
+	for (int i = 0; i < 16; i++)
+	{	
+		if (getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart < 0)
+			getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart = 0;
+	}
 
-	for (int i = 0; i < 4; i++)
+	BYTE count = 0;
+
+	if (logicalDisk)
 	{
-		newOffset += getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart;
-		if (getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart == 0)
-		{	
-			getDriveLayoutInformation->PartitionEntry[i].StartingOffset.QuadPart = 512 + newOffset;
-			getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart = lengthPartition * 1024 * 1024;
-			getDriveLayoutInformation->PartitionEntry[i].HiddenSectors = 0;
-			getDriveLayoutInformation->PartitionEntry[i].PartitionNumber = i;
-			getDriveLayoutInformation->PartitionEntry[i].PartitionType = 0x05;
-			getDriveLayoutInformation->PartitionEntry[i].BootIndicator = 0;
-			getDriveLayoutInformation->PartitionEntry[i].RecognizedPartition = 1;
-			getDriveLayoutInformation->PartitionEntry[i].RewritePartition = 1;
-			break;
+		BYTE i = 0;
+		DWORD newHidden = 0;
+		
+		int fl = 0;
+		for (i = 0; i < 16 && fl == 0; i++)
+		{
+			
+			if (getDriveLayoutInformation->PartitionEntry[i].RecognizedPartition != 0)
+			{
+				newOffset += getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart;
+			}
+			if (getDriveLayoutInformation->PartitionEntry[i].RecognizedPartition == 0)
+			for (int j = i + 1; j <= i + 4; j++)
+			{
+				newOffset += getDriveLayoutInformation->PartitionEntry[j].PartitionLength.QuadPart;
+				newHidden += getDriveLayoutInformation->PartitionEntry[j].PartitionLength.QuadPart / 512;
+				if (getDriveLayoutInformation->PartitionEntry[j].PartitionLength.QuadPart <= 0)
+				{
+					getDriveLayoutInformation->PartitionEntry[j].StartingOffset.QuadPart = 2 * 65536 + newOffset;
+					getDriveLayoutInformation->PartitionEntry[j].PartitionLength.QuadPart = lengthPartition * 1024 * 1024;
+					getDriveLayoutInformation->PartitionEntry[j].HiddenSectors = newHidden + 128;
+					getDriveLayoutInformation->PartitionEntry[j].PartitionNumber = j;
+					getDriveLayoutInformation->PartitionEntry[j].PartitionType = partitionType;
+					getDriveLayoutInformation->PartitionEntry[j].BootIndicator = 0;
+					getDriveLayoutInformation->PartitionEntry[j].RecognizedPartition = recognizedPartition;
+					getDriveLayoutInformation->PartitionEntry[j].RewritePartition = 1;
+					getDriveLayoutInformation->PartitionEntry[i].RewritePartition = 1;
+					fl = 1;
+					break;
+				}
+				if (j == i + 4)
+					i = j;
+			}
+		}
+	}
+	else
+	{
+		for (int i = 0; i < 16; i++)
+		{	//если встречаем расширенный раздел, то пропускаем все его подразделы для того чтобы выставить двойки - это нужно для того чтобы была разница между пустыми разделами и расширенными
+			if (getDriveLayoutInformation->PartitionEntry[i].RecognizedPartition == 0 && getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart > 0)
+			{
+				i = i + 4;
+				continue;
+			}
+			getDriveLayoutInformation->PartitionEntry[i].RecognizedPartition = 2;
+		}
+
+		for (int i = 0; i < 16; i++)
+		{
+			if (getDriveLayoutInformation->PartitionEntry[i].RecognizedPartition == 0)					//если встречаем расширенный раздел, то пропускаем все его подразделы
+			{
+				newOffset += getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart;
+				i = i + 4;
+				continue;
+			}
+			newOffset += getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart;
+			partitionNumber = i + 1;
+			if (getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart <= 0)
+			{
+				getDriveLayoutInformation->PartitionEntry[i].StartingOffset.QuadPart = 65536 + newOffset;
+				getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart = lengthPartition * 1024 * 1024;
+				getDriveLayoutInformation->PartitionEntry[i].HiddenSectors = newOffset / 512 + 128;
+				getDriveLayoutInformation->PartitionEntry[i].PartitionNumber = partitionNumber;
+				getDriveLayoutInformation->PartitionEntry[i].PartitionType = partitionType;
+				getDriveLayoutInformation->PartitionEntry[i].BootIndicator = 0;
+				getDriveLayoutInformation->PartitionEntry[i].RecognizedPartition = recognizedPartition;
+				getDriveLayoutInformation->PartitionEntry[i].RewritePartition = 1;
+				break;
+			}
 		}
 	}
 
 	result = DeviceIoControl(
-		hDevice,         
+		hDevice,
 		IOCTL_DISK_SET_DRIVE_LAYOUT,
-		getDriveLayoutInformation,         
-		size,      
-		NULL,                       
-		0,                           
-		&dwBytesReturned,  
-		NULL  
+		getDriveLayoutInformation,
+		size,
+		NULL,
+		0,
+		&dwBytesReturned,
+		NULL
 		);
 
 	if (!result)
@@ -341,8 +417,70 @@ void AddPartition(HANDLE hDevice)
 		cout << "\nError " << error << endl;
 		return;
 	}
+}
 
-	cout << "Раздел успешно создан" << endl;
+void DeletePartition(HANDLE hDevice)
+{
+	DRIVE_LAYOUT_INFORMATION *setDriveLayoutInformation;
+	DWORD dwBytesReturned = 0;
+	DWORD size = 0;
+	BYTE result = 0;
+	DWORD partitionNumber = 0;
+
+	system("CLS");
+
+	cout << "Введите номер раздела: ";
+	fflush(stdin);
+	scanf("%d", &partitionNumber);
+	cout << endl;
+
+	size = sizeof(DRIVE_LAYOUT_INFORMATION)+16 * sizeof(PARTITION_INFORMATION);
+
+	setDriveLayoutInformation = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
+	if (!setDriveLayoutInformation)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return;
+	}
+
+	setDriveLayoutInformation = GetDriveLayoutInformation(hDevice);
+
+	for (int j = 0; j < 16; j++)
+	{
+		if (setDriveLayoutInformation->PartitionEntry[j].PartitionNumber == partitionNumber)
+		{
+			setDriveLayoutInformation->PartitionEntry[j].StartingOffset.QuadPart = 0;
+			setDriveLayoutInformation->PartitionEntry[j].PartitionLength.QuadPart = 0;
+			setDriveLayoutInformation->PartitionEntry[j].HiddenSectors = 0;
+			setDriveLayoutInformation->PartitionEntry[j].PartitionNumber = -3422355236;			//указано такое значение для того чтобы можно было удалить расширенный раздел, так как у него номер 0, для это указываем значение отличное от нуля
+			setDriveLayoutInformation->PartitionEntry[j].PartitionType = 0;
+			setDriveLayoutInformation->PartitionEntry[j].BootIndicator = 0;
+			setDriveLayoutInformation->PartitionEntry[j].RecognizedPartition = 0;
+			setDriveLayoutInformation->PartitionEntry[j].RewritePartition = 1;
+			break;
+		}
+	}
+
+	result = DeviceIoControl(
+		hDevice,
+		IOCTL_DISK_SET_DRIVE_LAYOUT,
+		setDriveLayoutInformation,
+		size,
+		NULL,
+		0,
+		&dwBytesReturned,
+		NULL
+		);
+
+	if (!result)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return ;
+	}
+
+	cout << "Раздел удален" << endl;
 }
 
 DRIVE_LAYOUT_INFORMATION* GetDriveLayoutInformation(HANDLE hDevice)
@@ -353,7 +491,7 @@ DRIVE_LAYOUT_INFORMATION* GetDriveLayoutInformation(HANDLE hDevice)
 	int result;
 	int size;
 
-	size = sizeof(DRIVE_LAYOUT_INFORMATION) + 4 * sizeof(PARTITION_INFORMATION);
+	size = sizeof(DRIVE_LAYOUT_INFORMATION) + 16 * sizeof(PARTITION_INFORMATION);
 	driveLayoutInformation = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
 	if (!driveLayoutInformation)
 	{
@@ -374,9 +512,25 @@ DRIVE_LAYOUT_INFORMATION* GetDriveLayoutInformation(HANDLE hDevice)
 	if (!result)
 	{
 		int error = GetLastError();
-		cout << "\Error " << error << endl;
+		cout << "\nError " << error << endl;
 		return 0;
 	}
+
+	for (int i = 0; i < 16; i++)
+	{
+		if (driveLayoutInformation->PartitionEntry[i].HiddenSectors == 3452816845)
+		{
+			driveLayoutInformation->PartitionEntry[i].StartingOffset.QuadPart = 0;
+			driveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart = 0;
+			driveLayoutInformation->PartitionEntry[i].HiddenSectors = 0;
+			driveLayoutInformation->PartitionEntry[i].PartitionNumber = 0;
+			driveLayoutInformation->PartitionEntry[i].PartitionType = 0;
+			driveLayoutInformation->PartitionEntry[i].BootIndicator = 0;
+			driveLayoutInformation->PartitionEntry[i].RecognizedPartition = 0;
+			driveLayoutInformation->PartitionEntry[i].RewritePartition = 0;
+		}
+	}
+	driveLayoutInformation->PartitionCount = 16;
 
 	return driveLayoutInformation;
 }
