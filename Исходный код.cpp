@@ -3,6 +3,7 @@
 #include <iostream>
 #include <conio.h>
 #include <locale.h>
+#include <string.h> 
 
 using namespace std;
 
@@ -12,6 +13,7 @@ void PartitionManager(HANDLE);
 void AddPartition(HANDLE, DWORD, BYTE, BYTE, BOOLEAN);
 void DeletePartition(HANDLE);
 DRIVE_LAYOUT_INFORMATION* GetDriveLayoutInformation(HANDLE);
+HANDLE SelectionDisk();
 
 /* структура элемента раздела */
 struct Part {
@@ -74,6 +76,7 @@ int main()
 		cout << "3 - Удалить раздел" << endl;
 		cout << "4 - Увеличить раздел" << endl;
 		cout << "5 - Уменьшить раздел" << endl;
+		cout << "6 - Выбрать диск" << endl;
 		cout << "0 - Выход" << endl;
 		switch (_getch())
 		{
@@ -103,66 +106,6 @@ int main()
 			PartitionManager(hFile);
 			break;
 		case '3':
-			/*cout << "Введите номер раздела: " << endl;
-			while (flEnd)
-			{
-				fflush(stdin);
-				switch (_getch())
-				{
-				case '1':
-					for (int i = 446; i < 462; i++)
-						buf[i] = 0;
-					SetFilePointer(hFile, 0, 0, FILE_BEGIN);
-					if (!WriteFile(hFile, &buf, 512, &numberOfBytesRead, NULL))
-					{
-						int error = GetLastError();
-						cout << "\nError" << error << endl;
-					}
-					cout << "Раздел успешно удален" << endl;
-					flEnd = 0;
-					break;
-				case '2':
-					for (int i = 462; i < 478; i++)
-						buf[i] = 0;
-					SetFilePointer(hFile, 0, 0, FILE_BEGIN);
-					if (!WriteFile(hFile, &buf, 512, &numberOfBytesRead, NULL))
-					{
-						int error = GetLastError();
-						cout << "\nError" << error << endl;
-					}
-					cout << "Раздел успешно удален" << endl;
-					flEnd = 0;
-					break;
-				case '3':
-					for (int i = 478; i < 494; i++)
-						buf[i] = 0;
-					SetFilePointer(hFile, 0, 0, FILE_BEGIN);
-					if (!WriteFile(hFile, &buf, 512, &numberOfBytesRead, NULL))
-					{
-						int error = GetLastError();
-						printf("\nError %d", error);
-					}
-					cout << "Раздел успешно удален" << endl;
-					flEnd = 0;
-					break;
-				case '4':
-					for (int i = 494; i < 510; i++)
-						buf[i] = 0;
-					SetFilePointer(hFile, 0, 0, FILE_BEGIN);
-					if (!WriteFile(hFile, &buf, 512, &numberOfBytesRead, NULL))
-					{
-						int error = GetLastError();
-						printf("\nError %d", error);
-					}
-					cout << "Раздел успешно удален" << endl;
-					flEnd = 0;
-					break;
-				default:
-					cout << "Неправильно!!!Попробуй еще раз" << endl;
-					break;
-				}
-			}
-			break;*/
 			DeletePartition(hFile);
 			break;
 		case '4':
@@ -170,6 +113,9 @@ int main()
 			break;
 		case '5':
 			GrowPartition(hFile, -1);
+			break;
+		case '6':
+			hFile = SelectionDisk();
 			break;
 		case '0': 
 			return 0;
@@ -384,7 +330,9 @@ void AddPartition(HANDLE hDevice, DWORD lengthPartition, BYTE recognizedPartitio
 				continue;
 			}
 			newOffset += getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart;
-			partitionNumber = i + 1;
+			if (recognizedPartition == 0)
+				partitionNumber = 0;
+			else partitionNumber = i + 1;
 			if (getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart <= 0)
 			{
 				getDriveLayoutInformation->PartitionEntry[i].StartingOffset.QuadPart = 65536 + newOffset;
@@ -431,7 +379,7 @@ void DeletePartition(HANDLE hDevice)
 
 	cout << "Введите номер раздела: ";
 	fflush(stdin);
-	scanf("%d", &partitionNumber);
+	scanf_s("%d", &partitionNumber);
 	cout << endl;
 
 	size = sizeof(DRIVE_LAYOUT_INFORMATION)+16 * sizeof(PARTITION_INFORMATION);
@@ -453,12 +401,12 @@ void DeletePartition(HANDLE hDevice)
 			setDriveLayoutInformation->PartitionEntry[j].StartingOffset.QuadPart = 0;
 			setDriveLayoutInformation->PartitionEntry[j].PartitionLength.QuadPart = 0;
 			setDriveLayoutInformation->PartitionEntry[j].HiddenSectors = 0;
-			setDriveLayoutInformation->PartitionEntry[j].PartitionNumber = -3422355236;			//указано такое значение для того чтобы можно было удалить расширенный раздел, так как у него номер 0, для это указываем значение отличное от нуля
+			setDriveLayoutInformation->PartitionEntry[j].PartitionNumber = 0;			//указано такое значение для того чтобы можно было удалить расширенный раздел, так как у него номер 0, для это указываем значение отличное от нуля
 			setDriveLayoutInformation->PartitionEntry[j].PartitionType = 0;
 			setDriveLayoutInformation->PartitionEntry[j].BootIndicator = 0;
 			setDriveLayoutInformation->PartitionEntry[j].RecognizedPartition = 0;
 			setDriveLayoutInformation->PartitionEntry[j].RewritePartition = 1;
-			break;
+			
 		}
 	}
 
@@ -533,4 +481,38 @@ DRIVE_LAYOUT_INFORMATION* GetDriveLayoutInformation(HANDLE hDevice)
 	driveLayoutInformation->PartitionCount = 16;
 
 	return driveLayoutInformation;
+}
+
+HANDLE SelectionDisk()
+{
+	HANDLE hDevice;
+
+	system("CLS");
+
+	while (TRUE)
+	{
+		char str[27] = { "\\\\.\\PhysicalDrive" };
+		char numDisk;
+
+		cout << endl << "Введите номер диска: ";
+		cin >> numDisk;
+		strncat_s(str, &numDisk, 1);
+
+		hDevice = CreateFile(str,
+			GENERIC_READ | GENERIC_WRITE,
+			FILE_SHARE_READ | FILE_SHARE_WRITE,
+			NULL,
+			OPEN_EXISTING,
+			NULL,
+			NULL);
+
+		if (hDevice == INVALID_HANDLE_VALUE)
+		{
+			WORD error = GetLastError();
+			printf("\nОшибка! Проверьте правильность ввода %d", error);
+			continue;
+		}
+		break;
+	}
+	return hDevice;
 }
