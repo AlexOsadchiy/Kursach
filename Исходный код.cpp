@@ -4,6 +4,7 @@
 #include <conio.h>
 #include <locale.h>
 #include <string.h> 
+#include <stdlib.h>
 
 using namespace std;
 
@@ -12,6 +13,8 @@ void GrowPartition(HANDLE, int);
 void PartitionManager(HANDLE);
 void AddPartition(HANDLE, DWORD, BYTE, BYTE, BOOLEAN);
 void DeletePartition(HANDLE);
+void AddPartitionGPT(HANDLE, DWORD);
+PDRIVE_LAYOUT_INFORMATION_EX GetDriveLayoutGPT(HANDLE);
 DRIVE_LAYOUT_INFORMATION* GetDriveLayoutInformation(HANDLE);
 HANDLE SelectionDisk();
 
@@ -81,13 +84,13 @@ int main()
 		switch (_getch())
 		{
 		case '1':
-			DRIVE_LAYOUT_INFORMATION *getDriveLayoutInformation;
+			PDRIVE_LAYOUT_INFORMATION_EX getDriveLayoutInformation;
 			int size;
-			size = sizeof(DRIVE_LAYOUT_INFORMATION)+16 * sizeof(PARTITION_INFORMATION);
-			getDriveLayoutInformation = (DRIVE_LAYOUT_INFORMATION*)malloc(size);
-			getDriveLayoutInformation = GetDriveLayoutInformation(hFile);
+			size = sizeof(PDRIVE_LAYOUT_INFORMATION_EX)+64 * sizeof(PARTITION_INFORMATION_EX);
+			getDriveLayoutInformation = (PDRIVE_LAYOUT_INFORMATION_EX)calloc(1, size);
+			getDriveLayoutInformation = GetDriveLayoutGPT(hFile);
 			
-			for (int i = 0; i < 16; i++)
+			/*for (int i = 0; i < 16; i++)
 			{
 				cout << "Раздел: " << i << endl << endl;
 				cout << "StartingOffset          " << getDriveLayoutInformation->PartitionEntry[i].StartingOffset.QuadPart << endl;
@@ -98,8 +101,43 @@ int main()
 				cout << "BootIndicator           " << (short)getDriveLayoutInformation->PartitionEntry[i].BootIndicator << endl;
 				cout << "RecognizedPartition     " << (short)getDriveLayoutInformation->PartitionEntry[i].RecognizedPartition << endl;
 				cout << "RewritePartition        " << (int)getDriveLayoutInformation->PartitionEntry[i].RewritePartition << endl;
-			}
+			}*/
 			
+			for (int i = 0; i < 16; i++)
+			{
+				cout << "Раздел: " << i << endl << endl;
+				cout << "StartingOffset          " << getDriveLayoutInformation->PartitionEntry[i].StartingOffset.QuadPart << endl;
+				cout << "PartitionLength         " << getDriveLayoutInformation->PartitionEntry[i].PartitionLength.QuadPart << endl;
+				cout << "PartitionNumber         " << getDriveLayoutInformation->PartitionEntry[i].PartitionNumber << endl;
+				//cout << "PartitionType           " << getDriveLayoutInformation->PartitionEntry[i].Gpt.PartitionType. << endl;
+				cout << "RewritePartition        " << (int)getDriveLayoutInformation->PartitionEntry[i].RewritePartition << endl;
+			}
+
+			getDriveLayoutInformation->PartitionEntry[2] = getDriveLayoutInformation->PartitionEntry[1];
+			getDriveLayoutInformation->PartitionEntry[2].PartitionNumber = 3;
+			getDriveLayoutInformation->PartitionEntry[2].RewritePartition = 1;
+			getDriveLayoutInformation->PartitionEntry[2].StartingOffset.QuadPart += 104857600;
+			
+			getDriveLayoutInformation->PartitionCount = 3;
+
+			
+			DWORD dwBytesReturned;
+			int result;
+			result = DeviceIoControl(hFile,
+				IOCTL_DISK_SET_DRIVE_LAYOUT_EX,
+				getDriveLayoutInformation,
+				size,
+				NULL,
+				0,
+				&dwBytesReturned,
+				NULL);
+
+			if (!result)
+			{
+				int error;
+				error = GetLastError();
+				cout << "\nError " << error << endl;
+			}
 			//GetDiskGeometry(hFile);
 			break;
 		case '2':
@@ -219,6 +257,7 @@ void PartitionManager(HANDLE hDevice)
 	cout << "1. Основной" << endl;
 	cout << "2. Расширенный" << endl;
 	cout << "3. Логический диск" << endl;
+	cout << "4. Раздел GPT" << endl;
 	cin>> partitionType;
 
 		switch (partitionType)
@@ -238,6 +277,9 @@ void PartitionManager(HANDLE hDevice)
 			recognizedPartition = 1;
 			logicalDisk = 1;
 			AddPartition(hDevice, lengthPartition, recognizedPartition, partitionType, logicalDisk);
+			break;
+		case '4':
+			AddPartitionGPT(hDevice, lengthPartition);
 			break;
 	}
 	cout << "Раздел успешно создан" << endl;
@@ -508,11 +550,110 @@ HANDLE SelectionDisk()
 
 		if (hDevice == INVALID_HANDLE_VALUE)
 		{
-			WORD error = GetLastError();
+			DWORD error = GetLastError();
 			printf("\nОшибка! Проверьте правильность ввода %d", error);
 			continue;
 		}
 		break;
 	}
 	return hDevice;
+}
+
+PDRIVE_LAYOUT_INFORMATION_EX GetDriveLayoutGPT(HANDLE hDevice)
+{
+	PDRIVE_LAYOUT_INFORMATION_EX driveLayoutInformationGPT;
+	DWORD dwBytesReturned = 0;
+
+	int result;
+	int size;
+
+	size = sizeof(PDRIVE_LAYOUT_INFORMATION_EX)+64 * sizeof(PARTITION_INFORMATION_EX);
+	driveLayoutInformationGPT = (PDRIVE_LAYOUT_INFORMATION_EX) calloc(1, size);
+	if (!driveLayoutInformationGPT)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return driveLayoutInformationGPT;
+	}
+
+	result = DeviceIoControl(hDevice,
+		IOCTL_DISK_GET_DRIVE_LAYOUT_EX,
+		NULL,
+		0,
+		driveLayoutInformationGPT,
+		size,
+		&dwBytesReturned,
+		NULL);
+
+	if (!result)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return driveLayoutInformationGPT;
+	}
+	return driveLayoutInformationGPT;
+}
+
+void AddPartitionGPT(HANDLE hDevice, DWORD lengthPartition)
+{
+	PDRIVE_LAYOUT_INFORMATION_EX setDriveLayoutInformationGPT;
+	DWORD dwBytesReturned = 0;
+
+	int result;
+	int size;
+
+	size = sizeof(PDRIVE_LAYOUT_INFORMATION_EX)+64 * sizeof(PARTITION_INFORMATION_EX);
+	setDriveLayoutInformationGPT = (PDRIVE_LAYOUT_INFORMATION_EX)calloc(1, size);
+	if (!setDriveLayoutInformationGPT)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return ;
+	}
+
+	setDriveLayoutInformationGPT = GetDriveLayoutGPT(hDevice);
+
+	for (BYTE i = 1; i < 64; i++)		
+	{
+		if (setDriveLayoutInformationGPT->PartitionEntry[i].PartitionLength.QuadPart == 0)
+		{
+			setDriveLayoutInformationGPT->PartitionEntry[i] = setDriveLayoutInformationGPT->PartitionEntry[i - 1];
+		
+			setDriveLayoutInformationGPT->PartitionEntry[i].PartitionNumber++;
+			setDriveLayoutInformationGPT->PartitionEntry[i].RewritePartition = 1;
+			setDriveLayoutInformationGPT->PartitionEntry[i].StartingOffset.QuadPart += setDriveLayoutInformationGPT->PartitionEntry[i - 1].PartitionLength.QuadPart;
+			setDriveLayoutInformationGPT->PartitionEntry[i].PartitionLength.QuadPart = lengthPartition * 1024 * 1024;
+			setDriveLayoutInformationGPT->PartitionCount++;
+
+			setDriveLayoutInformationGPT->PartitionEntry[i].Gpt.PartitionType = { 0xEBD0A0A2, 0xB9E5, 0x4433 };
+			setDriveLayoutInformationGPT->PartitionEntry[i].Gpt.PartitionType.Data4[0] = 0x87;
+			setDriveLayoutInformationGPT->PartitionEntry[i].Gpt.PartitionType.Data4[1] = 0xC0;
+			setDriveLayoutInformationGPT->PartitionEntry[i].Gpt.PartitionType.Data4[2] = 0x68;
+			setDriveLayoutInformationGPT->PartitionEntry[i].Gpt.PartitionType.Data4[3] = 0xB6;
+			setDriveLayoutInformationGPT->PartitionEntry[i].Gpt.PartitionType.Data4[4] = 0xB7;
+			setDriveLayoutInformationGPT->PartitionEntry[i].Gpt.PartitionType.Data4[5] = 0x26;
+			setDriveLayoutInformationGPT->PartitionEntry[i].Gpt.PartitionType.Data4[6] = 0x99;
+			setDriveLayoutInformationGPT->PartitionEntry[i].Gpt.PartitionType.Data4[7] = 0xC7;
+
+			setDriveLayoutInformationGPT->PartitionEntry[i].Gpt.PartitionId.Data1++;
+
+			break;
+		}
+	}
+
+	result = DeviceIoControl(hDevice,
+		IOCTL_DISK_SET_DRIVE_LAYOUT_EX,
+		setDriveLayoutInformationGPT,
+		size,
+		NULL,
+		0,
+		&dwBytesReturned,
+		NULL);
+
+	if (!result)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return ;
+	}
 }
