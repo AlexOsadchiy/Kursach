@@ -9,11 +9,13 @@
 using namespace std;
 
 void GetDiskGeometry(HANDLE);
-void GrowPartition(HANDLE, int);
+void GrowPartition(HANDLE, int, int);
 void PartitionManager(HANDLE);
 void AddPartition(HANDLE, DWORD, BYTE, BYTE, BOOLEAN);
 void DeletePartition(HANDLE);
 void AddPartitionGPT(HANDLE, DWORD);
+void DeletePartitionGPT(HANDLE);
+void ShiftPartition(HANDLE, int, int);
 PDRIVE_LAYOUT_INFORMATION_EX GetDriveLayoutGPT(HANDLE);
 DRIVE_LAYOUT_INFORMATION* GetDriveLayoutInformation(HANDLE);
 HANDLE SelectionDisk();
@@ -113,44 +115,79 @@ int main()
 				cout << "RewritePartition        " << (int)getDriveLayoutInformation->PartitionEntry[i].RewritePartition << endl;
 			}
 
-			getDriveLayoutInformation->PartitionEntry[2] = getDriveLayoutInformation->PartitionEntry[1];
-			getDriveLayoutInformation->PartitionEntry[2].PartitionNumber = 3;
-			getDriveLayoutInformation->PartitionEntry[2].RewritePartition = 1;
-			getDriveLayoutInformation->PartitionEntry[2].StartingOffset.QuadPart += 104857600;
-			
-			getDriveLayoutInformation->PartitionCount = 3;
-
-			
-			DWORD dwBytesReturned;
-			int result;
-			result = DeviceIoControl(hFile,
-				IOCTL_DISK_SET_DRIVE_LAYOUT_EX,
-				getDriveLayoutInformation,
-				size,
-				NULL,
-				0,
-				&dwBytesReturned,
-				NULL);
-
-			if (!result)
-			{
-				int error;
-				error = GetLastError();
-				cout << "\nError " << error << endl;
-			}
 			//GetDiskGeometry(hFile);
 			break;
 		case '2':
 			PartitionManager(hFile);
 			break;
 		case '3':
-			DeletePartition(hFile);
+			BYTE temp;
+
+			system("CLS");
+			while (TRUE)
+			{
+				cout << "1. MBR" << endl;
+				cout << "2. GPT" << endl;
+				scanf_s("%d", &temp);
+				if (temp == 1 || temp == 2)	break;
+				system("CLS");
+				cout << "Проверьте введенное значение!" << endl;
+			}
+			switch (temp)
+			{
+			case 1:
+				DeletePartition(hFile);
+				break;
+			case 2:
+				DeletePartitionGPT(hFile);
+				break;
+			}
 			break;
 		case '4':
-			GrowPartition(hFile, 1);
+			BYTE temp2;
+
+			system("CLS");
+			while (TRUE)
+			{
+				cout << "1. MBR" << endl;
+				cout << "2. GPT" << endl;
+				scanf_s("%d", &temp2);
+				if (temp2 == 1 || temp2 == 2)	break;
+				system("CLS");
+				cout << "Проверьте введенное значение!" << endl;
+			}
+			switch (temp2)
+			{
+			case 1:
+				GrowPartition(hFile, 1, 0);
+				break;
+			case 2:
+				GrowPartition(hFile, 1, 1);
+				break;
+			}
 			break;
 		case '5':
-			GrowPartition(hFile, -1);
+			BYTE temp3;
+
+			system("CLS");
+			while (TRUE)
+			{
+				cout << "1. MBR" << endl;
+				cout << "2. GPT" << endl;
+				scanf_s("%d", &temp3);
+				if (temp3 == 1 || temp3 == 2)	break;
+				system("CLS");
+				cout << "Проверьте введенное значение!" << endl;
+			}
+			switch (temp3)
+			{
+			case 1:
+				GrowPartition(hFile, -1, 0);
+				break;
+			case 2:
+				GrowPartition(hFile, -1, 1);
+				break;
+			}
 			break;
 		case '6':
 			hFile = SelectionDisk();
@@ -200,7 +237,7 @@ void GetDiskGeometry(HANDLE hDevice)
 	cout << "Размер диска в байтах: " << diskGeometry.DiskSize.QuadPart << endl;
 }
 
-void GrowPartition(HANDLE hDevice, int operation)
+void GrowPartition(HANDLE hDevice, int operation, int GPT)
 {
 	DISK_GROW_PARTITION growPartition;
 	DWORD BytesReturned = 0;
@@ -217,6 +254,12 @@ void GrowPartition(HANDLE hDevice, int operation)
 	cout << "Изменить раздел на (Мегабайт): ";
 	cin >> size;
 	growPartition.BytesToGrow.QuadPart = operation * size * 1024 * 1024;
+
+	if (GPT == 1 && operation > 0)
+	{
+		size = size * operation;
+		ShiftPartition(hDevice, numPart, size);
+	}
 
 	result = DeviceIoControl(
 		hDevice,
@@ -235,7 +278,55 @@ void GrowPartition(HANDLE hDevice, int operation)
 		return;
 	}
 
+	if (GPT == 1 && operation < 0)
+	{
+		size = size * operation;
+		ShiftPartition(hDevice, numPart, size);
+	}
+
 	cout << "Раздел изменен" << endl;
+}
+
+void ShiftPartition(HANDLE hDevice, int partitionNumber, int sizeGrow)
+{
+	PDRIVE_LAYOUT_INFORMATION_EX setDriveLayoutInformationGPT;
+	DWORD dwBytesReturned = 0;
+
+	int result;
+	int size;
+
+	size = sizeof(PDRIVE_LAYOUT_INFORMATION_EX)+64 * sizeof(PARTITION_INFORMATION_EX);
+	setDriveLayoutInformationGPT = (PDRIVE_LAYOUT_INFORMATION_EX)calloc(1, size);
+	if (!setDriveLayoutInformationGPT)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return;
+	}
+
+	setDriveLayoutInformationGPT = GetDriveLayoutGPT(hDevice);
+
+	for (int i = partitionNumber; i < 64 || setDriveLayoutInformationGPT->PartitionEntry[i].PartitionLength.QuadPart != 0; i++)
+	{
+		setDriveLayoutInformationGPT->PartitionEntry[i].StartingOffset.QuadPart += sizeGrow * 1024 * 1024;
+		setDriveLayoutInformationGPT->PartitionEntry[i].RewritePartition = 1;
+	}
+
+	result = DeviceIoControl(hDevice,
+		IOCTL_DISK_SET_DRIVE_LAYOUT_EX,
+		setDriveLayoutInformationGPT,
+		size,
+		NULL,
+		0,
+		&dwBytesReturned,
+		NULL);
+
+	if (!result)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return;
+	}
 }
 
 void PartitionManager(HANDLE hDevice)
@@ -656,4 +747,66 @@ void AddPartitionGPT(HANDLE hDevice, DWORD lengthPartition)
 		cout << "\nError " << error << endl;
 		return ;
 	}
+
+	cout << "Раздел успешно создан" << endl;
+}
+
+void DeletePartitionGPT(HANDLE hDevice)
+{
+	PDRIVE_LAYOUT_INFORMATION_EX setDriveLayoutInformationGPT;
+	DWORD dwBytesReturned = 0;
+	DWORD partitionNumber;
+
+	int result;
+	int size;
+
+	size = sizeof(PDRIVE_LAYOUT_INFORMATION_EX)+64 * sizeof(PARTITION_INFORMATION_EX);
+	setDriveLayoutInformationGPT = (PDRIVE_LAYOUT_INFORMATION_EX)calloc(1, size);
+	if (!setDriveLayoutInformationGPT)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return;
+	}
+
+	setDriveLayoutInformationGPT = GetDriveLayoutGPT(hDevice);
+
+	while (TRUE)
+	{
+		cout << "Введите номер раздела для удаления: ";
+		fflush(stdin);
+		scanf_s("%d", &partitionNumber);
+		cout << endl;
+
+		if (partitionNumber > 128 || partitionNumber <= 1)
+			continue;
+
+		for (BYTE i = 1; i < 64; i++)
+		{
+			if (setDriveLayoutInformationGPT->PartitionEntry[i].PartitionNumber == partitionNumber)
+			{
+				ZeroMemory(&setDriveLayoutInformationGPT->PartitionEntry[i], sizeof(PARTITION_INFORMATION_EX));
+				break;
+			}
+		}
+		break;
+	}
+
+	result = DeviceIoControl(hDevice,
+		IOCTL_DISK_SET_DRIVE_LAYOUT_EX,
+		setDriveLayoutInformationGPT,
+		size,
+		NULL,
+		0,
+		&dwBytesReturned,
+		NULL);
+
+	if (!result)
+	{
+		int error = GetLastError();
+		cout << "\nError " << error << endl;
+		return;
+	}
+
+	cout << "Раздел успешно создан" << endl;
 }
